@@ -1,60 +1,89 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Secretum Web</title>
-  <link rel="stylesheet" href="/app.css" />
-</head>
-<body class="bg-primary text-white font-body text-sm min-h-screen flex items-center justify-center py-8 px-4">
-<div class="w-full max-w-[560px]">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Secretum Web</title>
+    <link rel="stylesheet" href="/app.css" />
+  </head>
+  <body
+    class="bg-primary text-secondary font-body text-sm min-h-screen flex items-center justify-center py-8 px-4"
+  >
+    <div class="w-full max-w-140">
+      <header class="mb-7">
+        <h1 class="text-[1.375rem] font-semibold tracking-tight">
+          Secretum Web
+        </h1>
+        <p class="text-secondary text-[0.8125rem] mt-1">
+          Deterministic passphrase from a FIDO2 hardware key — fully client-side
+        </p>
+      </header>
 
-  <header class="mb-7">
-    <h1 class="text-[1.375rem] font-semibold tracking-tight">Secretum Web</h1>
-    <p class="text-white/60 text-[0.8125rem] mt-1">Deterministic passphrase from a FIDO2 hardware key — fully client-side</p>
-  </header>
+      <div
+        class="rounded-md px-4 py-3 text-[0.8125rem] mb-4 bg-[rgba(210,153,34,0.12)] border border-[rgba(210,153,34,0.35)] text-[#e3b341]"
+        id="httpsWarning"
+        style="display: none"
+      >
+        WebAuthn requires HTTPS or localhost. Serve this page over a secure
+        origin.
+      </div>
 
-  <div class="rounded-md px-4 py-3 text-[0.8125rem] mb-4 bg-[rgba(210,153,34,0.12)] border border-[rgba(210,153,34,0.35)] text-[#e3b341]" id="httpsWarning" style="display:none">
-    WebAuthn requires HTTPS or localhost. Serve this page over a secure origin.
-  </div>
+      <!-- Derive card -->
+      <div class="bg-white/10 border rounded-lg py-5 px-6 mb-4">
+        <div class="mb-4">
+          <label
+            for="entryInput"
+            class="block text-xs font-medium text-secondary mb-1.5 uppercase tracking-[0.07em]"
+            >Entry</label
+          >
+          <input
+            type="text"
+            id="entryInput"
+            class="w-full bg-secondary/95 border rounded-md py-1.75 px-3 text-sm font-mono text-primary outline-none focus:border-primary transition-colors duration-120 placeholder:text-primary/40"
+            placeholder="e.g. github.com"
+            autocomplete="off"
+            spellcheck="false"
+          />
+        </div>
 
-  <!-- Setup card -->
-  <div class="bg-secondary border border-primary/20 rounded-lg py-5 px-6 mb-4">
-    <div class="text-[0.6875rem] font-semibold uppercase tracking-[0.09em] text-primary/60 mb-4">Setup</div>
+        <button
+          class="inline-flex items-center px-3.5 py-1.75 rounded-md font-semibold cursor-pointer bg-secondary text-primary transition-colors duration-120 leading-5 hover:bg-primary hover:text-secondary disabled:opacity-45 disabled:cursor-not-allowed"
+          id="btnDerive"
+        >
+          Derive passphrase
+        </button>
 
-    <div class="flex gap-2 flex-wrap">
-      <button class="inline-flex items-center px-3.5 py-[0.4375rem] rounded-md text-[0.8125rem] font-semibold cursor-pointer border border-primary/80 bg-primary text-white transition-colors duration-[120ms] leading-5 hover:bg-primary/80 disabled:opacity-45 disabled:cursor-not-allowed" id="btnSetup">Register key</button>
-    </div>
-    <div class="text-[0.8125rem] min-h-[1.2em] mt-3 text-primary/60" id="setupStatus"></div>
-  </div>
+        <div
+          class="mt-4 bg-white/20 border border-primary/20 rounded-md p-4"
+          id="passphraseBox"
+          style="display: none"
+        >
+          <div class="text-xs text-secondary mb-2">
+            Derived passphrase (hex · 64 chars · auto-clears in
+            <span id="timerSecs">60</span>s)
+          </div>
+          <div
+            class="font-mono text-sm break-all text-secondary tracking-[0.03em]"
+            id="passphraseValue"
+          ></div>
+          <div class="flex justify-between items-center mt-3">
+            <span class="text-xs text-secondary" id="timerLabel"></span>
+            <button
+              class="inline-flex items-center px-3.5 py-1.75 rounded-md font-semibold cursor-pointer bg-secondary text-primary transition-colors duration-120 leading-5 hover:bg-primary hover:text-secondary disabled:opacity-45 disabled:cursor-not-allowed"
+              id="btnCopy"
+            >
+              Copy
+            </button>
+          </div>
+        </div>
 
-  <!-- Derive card -->
-  <div class="bg-secondary border border-primary/20 rounded-lg py-5 px-6 mb-4">
-    <div class="text-[0.6875rem] font-semibold uppercase tracking-[0.09em] text-primary/60 mb-4">Derive passphrase</div>
-
-    <div class="mb-4">
-      <label for="entryInput" class="block text-xs font-medium text-primary/60 mb-1.5 uppercase tracking-[0.07em]">Entry</label>
-      <input type="text" id="entryInput"
-        class="w-full bg-white/40 border border-primary/30 rounded-md py-[0.4375rem] px-3 text-sm font-mono text-primary outline-none focus:border-primary transition-colors duration-[120ms] placeholder:text-primary/40"
-        placeholder="e.g. github.com" autocomplete="off" spellcheck="false" />
-    </div>
-
-    <button class="inline-flex items-center px-3.5 py-[0.4375rem] rounded-md text-[0.8125rem] font-semibold cursor-pointer border border-primary/80 bg-primary text-white transition-colors duration-[120ms] leading-5 hover:bg-primary/80 disabled:opacity-45 disabled:cursor-not-allowed" id="btnDerive">Touch your key</button>
-
-    <div class="mt-4 bg-white/20 border border-primary/20 rounded-md p-4" id="passphraseBox" style="display:none">
-      <div class="text-xs text-primary/60 mb-2">Derived passphrase (hex · 64 chars · auto-clears in <span id="timerSecs">60</span>s)</div>
-      <div class="font-mono text-sm break-all text-success tracking-[0.03em]" id="passphraseValue"></div>
-      <div class="flex justify-between items-center mt-3">
-        <span class="text-xs text-primary/60" id="timerLabel"></span>
-        <button class="inline-flex items-center px-3.5 py-[0.4375rem] rounded-md text-[0.8125rem] font-medium cursor-pointer border border-primary/30 bg-white/30 text-primary transition-colors duration-[120ms] leading-5 hover:bg-white/50 disabled:opacity-45 disabled:cursor-not-allowed" id="btnCopy">Copy</button>
+        <div
+          class="text-[0.8125rem] min-h-[1.2em] mt-3 text-secondary"
+          id="deriveStatus"
+        ></div>
       </div>
     </div>
 
-    <div class="text-[0.8125rem] min-h-[1.2em] mt-3 text-primary/60" id="deriveStatus"></div>
-  </div>
-
-</div>
-
-<script type="module" src="app.ts"></script>
-</body>
+    <script type="module" src="app.ts"></script>
+  </body>
 </html>

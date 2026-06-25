@@ -48,59 +48,11 @@ async function hkdfDerive(ikmBuf: BufferSource, entry: string): Promise<ArrayBuf
   );
 }
 
-// ── Setup ─────────────────────────────────────────────────────────────────────
-// Registers a resident credential with PRF enabled. Nothing is saved locally —
-// the credential lives entirely on the key, discovered by RP_ID at derive time.
-// Run once per key per origin (mirrors `secretum setup`).
-
-async function setup(): Promise<void> {
-  const userId    = randomBytes(32);
-  const challenge = randomBytes(32);
-
-  setStatus('setupStatus', 'Touch your key when it blinks…', '');
-
-  let cred: Credential | null;
-  try {
-    cred = await navigator.credentials.create({
-      publicKey: {
-        challenge:              challenge.buffer,
-        rp:                     { id: RP_ID, name: 'Secretum Web' },
-        user:                   { id: userId.buffer, name: 'secretum', displayName: 'Secretum' },
-        pubKeyCredParams:       [
-          { type: 'public-key', alg: -7   },  // ES256
-          { type: 'public-key', alg: -257 },  // RS256
-        ],
-        authenticatorSelection: {
-          authenticatorAttachment: 'cross-platform', // hardware key only
-          residentKey:             'required',        // discoverable — mirrors CLI's RK: true
-          userVerification:        'preferred',
-        },
-        extensions: { prf: {} },
-      },
-    } as CredentialCreationOptions);
-  } catch (e) {
-    const error = e instanceof Error ? e.message : String(e);
-    setStatus('setupStatus', `Setup failed: ${error}`, 'err');
-    return;
-  }
-
-  const publicKeyCredential = cred as PublicKeyCredential;
-  if (!publicKeyCredential.getClientExtensionResults()?.prf?.enabled) {
-    setStatus(
-      'setupStatus',
-      'PRF extension not supported by this key or browser. Requires Chrome 116+ and a FIDO2 key with hmac-secret.',
-      'err',
-    );
-    return;
-  }
-
-  setStatus('setupStatus', `Credential registered for "${RP_ID}". You can now derive passphrases on any machine.`, 'ok');
-}
-
 // ── Derive ────────────────────────────────────────────────────────────────────
-// No credential ID needed — the key discovers its own resident credential for
-// RP_ID, exactly as the CLI does with an empty credential list.
-// Same key + same entry = same passphrase everywhere.
+// Mirrors the CLI's derive command: tries get first; if no credential exists
+// for this RP_ID, registers one (with PRF eval at create time when supported),
+// then falls back to a second get if the key didn't return PRF during create.
+// Same key + same entry = same passphrase everywhere. Nothing stored locally.
 
 async function derive(): Promise<void> {
   const entry = (document.getElementById('entryInput') as HTMLInputElement).value.trim();
@@ -110,36 +62,101 @@ async function derive(): Promise<void> {
     return;
   }
 
-  const prfInput  = await entryPRFInput(entry);
-  const challenge = randomBytes(32);
+  const prfInput = await entryPRFInput(entry);
 
   setStatus('deriveStatus', 'Touch your key when it blinks…', '');
   (btnDerive as HTMLButtonElement).disabled = true;
   hidePassphrase();
 
-  let assertion: Credential | null;
+  // ── 1. Fast path: key already registered ──────────────────────────────────
+  let prfFirst: ArrayBuffer | null = null;
+
   try {
-    assertion = await navigator.credentials.get({
+    const assertion = await navigator.credentials.get({
       publicKey: {
-        challenge:        challenge.buffer,
+        challenge:        randomBytes(32).buffer,
         rpId:             RP_ID,
-        // No allowCredentials — key discovers its resident credential by RP_ID,
-        // just like the CLI passes an empty credential list.
         userVerification: 'preferred',
-        extensions: {
-          prf: { eval: { first: prfInput } },
-        },
+        extensions: { prf: { eval: { first: prfInput } } },
       },
     } as CredentialRequestOptions);
-  } catch (e) {
-    const error = e instanceof Error ? e.message : String(e);
-    setStatus('deriveStatus', `Derivation failed: ${error}`, 'err');
-    (btnDerive as HTMLButtonElement).disabled = false;
-    return;
+
+    prfFirst = ((assertion as PublicKeyCredential)
+      .getClientExtensionResults()?.prf?.results?.first ?? null) as ArrayBuffer | null;
+  } catch {
+    // No credential yet — fall through to register.
   }
 
-  const publicKeyCredential = assertion as PublicKeyCredential;
-  const prfFirst = publicKeyCredential.getClientExtensionResults()?.prf?.results?.first;
+  // ── 2. First-run path: register, then get PRF ──────────────────────────────
+  if (!prfFirst) {
+    setStatus('deriveStatus', 'No key registered — registering now. Touch your key when it blinks…', '');
+
+    let cred: Credential | null;
+    try {
+      cred = await navigator.credentials.create({
+        publicKey: {
+          challenge:        randomBytes(32).buffer,
+          rp:               { id: RP_ID, name: 'Secretum Web' },
+          user:             { id: randomBytes(32).buffer, name: 'secretum', displayName: 'Secretum' },
+          pubKeyCredParams: [
+            { type: 'public-key', alg: -7   },  // ES256
+            { type: 'public-key', alg: -257 },  // RS256
+          ],
+          authenticatorSelection: {
+            authenticatorAttachment: 'cross-platform',
+            residentKey:             'required',
+            userVerification:        'preferred',
+          },
+          // Request PRF at creation time — some keys return it immediately,
+          // saving a second touch. Others ignore it; we fall back below.
+          extensions: { prf: { eval: { first: prfInput } } },
+        },
+      } as CredentialCreationOptions);
+    } catch (e) {
+      setStatus('deriveStatus', `Registration failed: ${e instanceof Error ? e.message : String(e)}`, 'err');
+      (btnDerive as HTMLButtonElement).disabled = false;
+      return;
+    }
+
+    const pk  = cred as PublicKeyCredential;
+    const ext = pk.getClientExtensionResults();
+
+    if (!ext?.prf?.enabled) {
+      setStatus(
+        'deriveStatus',
+        'PRF extension not supported by this key or browser. Requires Chrome 116+ and a FIDO2 key with hmac-secret.',
+        'err',
+      );
+      (btnDerive as HTMLButtonElement).disabled = false;
+      return;
+    }
+
+    // Some keys return PRF during create — use it directly (one touch total).
+    prfFirst = (ext?.prf?.results?.first ?? null) as ArrayBuffer | null;
+
+    if (!prfFirst) {
+      // Most keys require a separate assertion after registration — touch again.
+      setStatus('deriveStatus', 'Key registered. Touch again to derive your passphrase…', '');
+      try {
+        const assertion = await navigator.credentials.get({
+          publicKey: {
+            challenge:        randomBytes(32).buffer,
+            rpId:             RP_ID,
+            userVerification: 'preferred',
+            extensions: { prf: { eval: { first: prfInput } } },
+          },
+        } as CredentialRequestOptions);
+
+        prfFirst = ((assertion as PublicKeyCredential)
+          .getClientExtensionResults()?.prf?.results?.first ?? null) as ArrayBuffer | null;
+      } catch (e) {
+        setStatus('deriveStatus', `Derivation failed: ${e instanceof Error ? e.message : String(e)}`, 'err');
+        (btnDerive as HTMLButtonElement).disabled = false;
+        return;
+      }
+    }
+  }
+
   if (!prfFirst) {
     setStatus(
       'deriveStatus',
@@ -203,11 +220,9 @@ function setStatus(id: string, msg: string, type: string): void {
 
 // ── Wiring ────────────────────────────────────────────────────────────────────
 
-const btnSetup  = document.getElementById('btnSetup') as HTMLButtonElement;
 const btnDerive = document.getElementById('btnDerive') as HTMLButtonElement;
 const btnCopy   = document.getElementById('btnCopy') as HTMLButtonElement;
 
-btnSetup.addEventListener('click', setup);
 btnDerive.addEventListener('click', derive);
 
 (document.getElementById('entryInput') as HTMLInputElement).addEventListener('keydown', (e: KeyboardEvent) => {
