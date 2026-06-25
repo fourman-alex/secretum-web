@@ -4,235 +4,57 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Secretum Web</title>
-  <style>
-    :root {
-      --bg:      #0d1117;
-      --surface: #161b22;
-      --border:  #30363d;
-      --text:    #e6edf3;
-      --muted:   #8b949e;
-      --accent:  #58a6ff;
-      --success: #3fb950;
-      --danger:  #f85149;
-      --mono:    'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
-    }
-
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-    body {
-      background: var(--bg);
-      color: var(--text);
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      font-size: 14px;
-      min-height: 100vh;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 2rem 1rem;
-    }
-
-    .container { width: 100%; max-width: 560px; }
-
-    header { margin-bottom: 1.75rem; }
-
-    h1 {
-      font-size: 1.375rem;
-      font-weight: 600;
-      letter-spacing: -0.02em;
-    }
-
-    .subtitle {
-      color: var(--muted);
-      font-size: 0.8125rem;
-      margin-top: 0.3rem;
-    }
-
-    .card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 1.25rem 1.5rem;
-      margin-bottom: 1rem;
-    }
-
-    .card-title {
-      font-size: 0.6875rem;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.09em;
-      color: var(--muted);
-      margin-bottom: 1rem;
-    }
-
-    .btn-row { display: flex; gap: 0.5rem; flex-wrap: wrap; }
-
-    button {
-      display: inline-flex;
-      align-items: center;
-      padding: 0.4375rem 0.875rem;
-      border-radius: 6px;
-      font-size: 0.8125rem;
-      font-weight: 500;
-      cursor: pointer;
-      border: 1px solid var(--border);
-      background: #21262d;
-      color: var(--text);
-      transition: background 0.12s, border-color 0.12s;
-      line-height: 1.25;
-    }
-
-    button:hover:not(:disabled) { background: #30363d; border-color: #8b949e; }
-    button:disabled { opacity: 0.45; cursor: not-allowed; }
-
-    button.primary {
-      background: var(--accent);
-      border-color: var(--accent);
-      color: #0d1117;
-      font-weight: 600;
-    }
-    button.primary:hover:not(:disabled) { background: #79c0ff; border-color: #79c0ff; }
-
-    .status {
-      margin-top: 0.75rem;
-      font-size: 0.8125rem;
-      color: var(--muted);
-      min-height: 1.2em;
-    }
-    .status.ok  { color: var(--success); }
-    .status.err { color: var(--danger);  }
-
-    .passphrase-box {
-      margin-top: 1rem;
-      background: var(--bg);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 1rem;
-      display: none;
-    }
-
-    .passphrase-label {
-      font-size: 0.75rem;
-      color: var(--muted);
-      margin-bottom: 0.5rem;
-    }
-
-    .passphrase-value {
-      font-family: var(--mono);
-      font-size: 0.875rem;
-      word-break: break-all;
-      color: var(--success);
-      letter-spacing: 0.03em;
-    }
-
-    .copy-row {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-top: 0.75rem;
-    }
-
-    .field {
-      margin-bottom: 1rem;
-    }
-
-    .field label {
-      display: block;
-      font-size: 0.75rem;
-      font-weight: 500;
-      color: var(--muted);
-      margin-bottom: 0.375rem;
-      text-transform: uppercase;
-      letter-spacing: 0.07em;
-    }
-
-    .field input[type="text"] {
-      width: 100%;
-      background: var(--bg);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 0.4375rem 0.75rem;
-      font-size: 0.875rem;
-      font-family: var(--mono);
-      color: var(--text);
-      outline: none;
-      transition: border-color 0.12s;
-    }
-
-    .field input[type="text"]:focus {
-      border-color: var(--accent);
-    }
-
-    .field input[type="text"]::placeholder {
-      color: var(--border);
-    }
-
-    .timer {
-      font-size: 0.75rem;
-      color: var(--muted);
-    }
-
-    .banner {
-      border-radius: 6px;
-      padding: 0.75rem 1rem;
-      font-size: 0.8125rem;
-      margin-bottom: 1rem;
-      display: none;
-    }
-
-    .banner.warn {
-      background: rgba(210,153,34,0.12);
-      border: 1px solid rgba(210,153,34,0.35);
-      color: #e3b341;
-    }
-  </style>
+  <link rel="stylesheet" href="/app.css" />
 </head>
-<body>
-<div class="container">
+<body class="bg-primary text-white font-body text-sm min-h-screen flex items-center justify-center py-8 px-4">
+<div class="w-full max-w-[560px]">
 
-  <header>
-    <h1>Secretum Web</h1>
-    <p class="subtitle">Deterministic passphrase from a FIDO2 hardware key — fully client-side</p>
+  <header class="mb-7">
+    <h1 class="text-[1.375rem] font-semibold tracking-tight">Secretum Web</h1>
+    <p class="text-white/60 text-[0.8125rem] mt-1">Deterministic passphrase from a FIDO2 hardware key — fully client-side</p>
   </header>
 
-  <div class="banner warn" id="httpsWarning">
+  <div class="rounded-md px-4 py-3 text-[0.8125rem] mb-4 bg-[rgba(210,153,34,0.12)] border border-[rgba(210,153,34,0.35)] text-[#e3b341]" id="httpsWarning" style="display:none">
     WebAuthn requires HTTPS or localhost. Serve this page over a secure origin.
   </div>
 
   <!-- Setup card -->
-  <div class="card">
-    <div class="card-title">Setup</div>
+  <div class="bg-secondary border border-primary/20 rounded-lg py-5 px-6 mb-4">
+    <div class="text-[0.6875rem] font-semibold uppercase tracking-[0.09em] text-primary/60 mb-4">Setup</div>
 
-    <div class="btn-row">
-      <button class="primary" id="btnSetup">Register key</button>
+    <div class="flex gap-2 flex-wrap">
+      <button class="inline-flex items-center px-3.5 py-[0.4375rem] rounded-md text-[0.8125rem] font-semibold cursor-pointer border border-primary/80 bg-primary text-white transition-colors duration-[120ms] leading-5 hover:bg-primary/80 disabled:opacity-45 disabled:cursor-not-allowed" id="btnSetup">Register key</button>
     </div>
-    <div class="status" id="setupStatus"></div>
+    <div class="text-[0.8125rem] min-h-[1.2em] mt-3 text-primary/60" id="setupStatus"></div>
   </div>
 
   <!-- Derive card -->
-  <div class="card">
-    <div class="card-title">Derive passphrase</div>
+  <div class="bg-secondary border border-primary/20 rounded-lg py-5 px-6 mb-4">
+    <div class="text-[0.6875rem] font-semibold uppercase tracking-[0.09em] text-primary/60 mb-4">Derive passphrase</div>
 
-    <div class="field">
-      <label for="entryInput">Entry</label>
-      <input type="text" id="entryInput" placeholder="e.g. github.com" autocomplete="off" spellcheck="false" />
+    <div class="mb-4">
+      <label for="entryInput" class="block text-xs font-medium text-primary/60 mb-1.5 uppercase tracking-[0.07em]">Entry</label>
+      <input type="text" id="entryInput"
+        class="w-full bg-white/40 border border-primary/30 rounded-md py-[0.4375rem] px-3 text-sm font-mono text-primary outline-none focus:border-primary transition-colors duration-[120ms] placeholder:text-primary/40"
+        placeholder="e.g. github.com" autocomplete="off" spellcheck="false" />
     </div>
 
-    <button class="primary" id="btnDerive">Touch your key</button>
+    <button class="inline-flex items-center px-3.5 py-[0.4375rem] rounded-md text-[0.8125rem] font-semibold cursor-pointer border border-primary/80 bg-primary text-white transition-colors duration-[120ms] leading-5 hover:bg-primary/80 disabled:opacity-45 disabled:cursor-not-allowed" id="btnDerive">Touch your key</button>
 
-    <div class="passphrase-box" id="passphraseBox">
-      <div class="passphrase-label">Derived passphrase (hex · 64 chars · auto-clears in <span id="timerSecs">60</span>s)</div>
-      <div class="passphrase-value" id="passphraseValue"></div>
-      <div class="copy-row">
-        <span class="timer" id="timerLabel"></span>
-        <button id="btnCopy">Copy</button>
+    <div class="mt-4 bg-white/20 border border-primary/20 rounded-md p-4" id="passphraseBox" style="display:none">
+      <div class="text-xs text-primary/60 mb-2">Derived passphrase (hex · 64 chars · auto-clears in <span id="timerSecs">60</span>s)</div>
+      <div class="font-mono text-sm break-all text-success tracking-[0.03em]" id="passphraseValue"></div>
+      <div class="flex justify-between items-center mt-3">
+        <span class="text-xs text-primary/60" id="timerLabel"></span>
+        <button class="inline-flex items-center px-3.5 py-[0.4375rem] rounded-md text-[0.8125rem] font-medium cursor-pointer border border-primary/30 bg-white/30 text-primary transition-colors duration-[120ms] leading-5 hover:bg-white/50 disabled:opacity-45 disabled:cursor-not-allowed" id="btnCopy">Copy</button>
       </div>
     </div>
 
-    <div class="status" id="deriveStatus"></div>
+    <div class="text-[0.8125rem] min-h-[1.2em] mt-3 text-primary/60" id="deriveStatus"></div>
   </div>
 
 </div>
 
-<script type="module" src="app.js"></script>
+<script type="module" src="app.ts"></script>
 </body>
 </html>

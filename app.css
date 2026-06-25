@@ -1,0 +1,39 @@
+@import "tailwindcss";
+
+@theme {
+  --color-*: initial;
+
+  --color-primary: #34113f;
+  --color-secondary: #d4f2d2;
+  --color-white: #ffffff;
+  --color-black: #000000;
+
+  /* Palette — neutral */
+  --color-neutral-0:    #000000;
+  --color-neutral-5:    #0E1212;
+  --color-neutral-10:   #191C1D;
+  --color-neutral-15:   #232627;
+  --color-neutral-20:   #2E3132;
+  --color-neutral-25:   #393C3D;
+  --color-neutral-30:   #444748;
+  --color-neutral-35:   #505353;
+  --color-neutral-40:   #5C5F5F;
+  --color-neutral-50:   #747878;
+  --color-neutral-60:   #8E9192;
+  --color-neutral-70:   #A9ACAC;
+  --color-neutral-80:   #C4C7C7;
+  --color-neutral-90:   #E1E3E3;
+  --color-neutral-95:   #EFF1F1;
+  --color-neutral-98:   #F8FAFA;
+  --color-neutral-99:   #FAFDFD;
+  --color-neutral-100:  #FFFFFF;
+
+  --font-display: "BBH Hegarty", ui-sans-serif, system-ui, sans-serif,
+    "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  --font-body: "Arimo", ui-sans-serif, system-ui, sans-serif,
+    "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+
+  /* Secretum UI semantic colors */
+  --color-success: #3fb950;
+  --color-danger: #f85149;
+}
