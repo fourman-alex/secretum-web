@@ -4,33 +4,59 @@ const RP_ID = window.location.hostname || 'localhost';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+/**
+ * Generate random bytes using the Web Crypto API.
+ * @param n - The number of random bytes to generate
+ * @returns A Uint8Array containing random bytes
+ */
 function randomBytes(n: number): Uint8Array {
   const buf = new Uint8Array(n);
   crypto.getRandomValues(buf);
   return buf;
 }
 
+/**
+ * Convert an ArrayBuffer to a hexadecimal string.
+ * @param buf - The ArrayBuffer to encode
+ * @returns A lowercase hex string representation
+ */
 function hexEncode(buf: ArrayBuffer): string {
   return Array.from(new Uint8Array(buf))
     .map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
+/**
+ * Compute the SHA-256 hash of a string.
+ * @param str - The string to hash
+ * @returns A Promise resolving to the SHA-256 hash as an ArrayBuffer
+ */
 async function sha256Bytes(str: string): Promise<ArrayBuffer> {
   return crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
 }
 
-// Mirrors the CLI's entryHMACSalt: sha256("secretum:entry:" + entry)
+/**
+ * Compute the entry PRF input for HKDF-SHA256.
+ * Mirrors the CLI's entryHMACSalt: sha256("secretum:entry:" + entry)
+ * @param entry - The entry name
+ * @returns A Promise resolving to the entry PRF input as an ArrayBuffer
+ */
 async function entryPRFInput(entry: string): Promise<ArrayBuffer> {
   return sha256Bytes('secretum:entry:' + entry);
 }
 
 // ── HKDF-SHA256 ───────────────────────────────────────────────────────────────
-// Mirrors the CLI's kdf.Derive exactly:
-//   IKM  = PRF/hmac-secret output from the hardware key
-//   salt = SHA-256("secretum:kdf-salt:v1")
-//   info = "secretum-v1-passphrase:" + entry
-//   OKM  = 32 bytes → 64-char hex passphrase
 
+/**
+ * Derive a 256-bit key using HKDF-SHA256.
+ * Mirrors the CLI's kdf.Derive exactly:
+ * - IKM  = PRF/hmac-secret output from the hardware key
+ * - salt = SHA-256("secretum:kdf-salt:v1")
+ * - info = "secretum-v1-passphrase:" + entry
+ * - OKM  = 32 bytes → 64-char hex passphrase
+ * @param ikmBuf - The input key material from the hardware device
+ * @param entry - The entry name for info parameter
+ * @returns A Promise resolving to the derived key material (256 bits)
+ */
 async function hkdfDerive(ikmBuf: BufferSource, entry: string): Promise<ArrayBuffer> {
   const hkdfSalt = await sha256Bytes('secretum:kdf-salt:v1');
   const ikm = await crypto.subtle.importKey(
@@ -48,12 +74,52 @@ async function hkdfDerive(ikmBuf: BufferSource, entry: string): Promise<ArrayBuf
   );
 }
 
-// ── Derive ────────────────────────────────────────────────────────────────────
-// Mirrors the CLI's derive command: tries get first; if no credential exists
-// for this RP_ID, registers one (with PRF eval at create time when supported),
-// then falls back to a second get if the key didn't return PRF during create.
-// Same key + same entry = same passphrase everywhere. Nothing stored locally.
+// ── Register ──────────────────────────────────────────────────────────────────
 
+/**
+ * Create a resident key on the FIDO2 hardware device.
+ * @returns A Promise that resolves when registration is complete
+ */
+async function register(): Promise<void> {
+  setStatus('registerStatus', 'Touch your key when it blinks…', '');
+  (btnRegister as HTMLButtonElement).disabled = true;
+
+  let cred: Credential | null;
+  try {
+    cred = await navigator.credentials.create({
+      publicKey: {
+        challenge:        randomBytes(32).buffer,
+        rp:               { id: RP_ID, name: 'Secretum Web' },
+        user:             { id: randomBytes(32).buffer, name: 'secretum', displayName: 'Secretum' },
+        pubKeyCredParams: [
+          { type: 'public-key', alg: -7   },  // ES256
+          { type: 'public-key', alg: -257 },  // RS256
+        ],
+        authenticatorSelection: {
+          authenticatorAttachment: 'cross-platform',
+          residentKey:             'required',
+          userVerification:        'preferred',
+        },
+      },
+    } as CredentialCreationOptions);
+  } catch (e) {
+    setStatus('registerStatus', `Registration failed: ${e instanceof Error ? e.message : String(e)}`, 'err');
+    (btnRegister as HTMLButtonElement).disabled = false;
+    return;
+  }
+
+  setStatus('registerStatus', 'Resident key created successfully.', 'ok');
+  (btnRegister as HTMLButtonElement).disabled = false;
+}
+
+// ── Derive ────────────────────────────────────────────────────────────────────
+
+/**
+ * Derive a passphrase from a registered resident key.
+ * Requires the key to be already registered (use the register function to create one).
+ * Same key + same entry = same passphrase everywhere. Nothing stored locally.
+ * @returns A Promise that resolves when derivation is complete
+ */
 async function derive(): Promise<void> {
   const entry = (document.getElementById('entryInput') as HTMLInputElement).value.trim();
   if (!entry) {
@@ -68,7 +134,7 @@ async function derive(): Promise<void> {
   (btnDerive as HTMLButtonElement).disabled = true;
   hidePassphrase();
 
-  // ── 1. Fast path: key already registered ──────────────────────────────────
+  // Get the credential from the registered resident key
   let prfFirst: ArrayBuffer | null = null;
 
   try {
@@ -81,80 +147,15 @@ async function derive(): Promise<void> {
       },
     } as CredentialRequestOptions);
 
-    prfFirst = ((assertion as PublicKeyCredential)
-      .getClientExtensionResults()?.prf?.results?.first ?? null) as ArrayBuffer | null;
-  } catch {
-    // No credential yet — fall through to register.
-  }
-
-  // ── 2. First-run path: register, then get PRF ──────────────────────────────
-  if (!prfFirst) {
-    setStatus('deriveStatus', 'No key registered — registering now. Touch your key when it blinks…', '');
-
-    let cred: Credential | null;
-    try {
-      cred = await navigator.credentials.create({
-        publicKey: {
-          challenge:        randomBytes(32).buffer,
-          rp:               { id: RP_ID, name: 'Secretum Web' },
-          user:             { id: randomBytes(32).buffer, name: 'secretum', displayName: 'Secretum' },
-          pubKeyCredParams: [
-            { type: 'public-key', alg: -7   },  // ES256
-            { type: 'public-key', alg: -257 },  // RS256
-          ],
-          authenticatorSelection: {
-            authenticatorAttachment: 'cross-platform',
-            residentKey:             'required',
-            userVerification:        'preferred',
-          },
-          // Request PRF at creation time — some keys return it immediately,
-          // saving a second touch. Others ignore it; we fall back below.
-          extensions: { prf: { eval: { first: prfInput } } },
-        },
-      } as CredentialCreationOptions);
-    } catch (e) {
-      setStatus('deriveStatus', `Registration failed: ${e instanceof Error ? e.message : String(e)}`, 'err');
-      (btnDerive as HTMLButtonElement).disabled = false;
-      return;
+    if (!assertion || !(assertion instanceof PublicKeyCredential)) {
+      throw new Error('Invalid credential type');
     }
 
-    const pk  = cred as PublicKeyCredential;
-    const ext = pk.getClientExtensionResults();
-
-    if (!ext?.prf?.enabled) {
-      setStatus(
-        'deriveStatus',
-        'PRF extension not supported by this key or browser. Requires Chrome 116+ and a FIDO2 key with hmac-secret.',
-        'err',
-      );
-      (btnDerive as HTMLButtonElement).disabled = false;
-      return;
-    }
-
-    // Some keys return PRF during create — use it directly (one touch total).
-    prfFirst = (ext?.prf?.results?.first ?? null) as ArrayBuffer | null;
-
-    if (!prfFirst) {
-      // Most keys require a separate assertion after registration — touch again.
-      setStatus('deriveStatus', 'Key registered. Touch again to derive your passphrase…', '');
-      try {
-        const assertion = await navigator.credentials.get({
-          publicKey: {
-            challenge:        randomBytes(32).buffer,
-            rpId:             RP_ID,
-            userVerification: 'preferred',
-            extensions: { prf: { eval: { first: prfInput } } },
-          },
-        } as CredentialRequestOptions);
-
-        prfFirst = ((assertion as PublicKeyCredential)
-          .getClientExtensionResults()?.prf?.results?.first ?? null) as ArrayBuffer | null;
-      } catch (e) {
-        setStatus('deriveStatus', `Derivation failed: ${e instanceof Error ? e.message : String(e)}`, 'err');
-        (btnDerive as HTMLButtonElement).disabled = false;
-        return;
-      }
-    }
+    prfFirst = (assertion.getClientExtensionResults()?.prf?.results?.first ?? null) as ArrayBuffer | null;
+  } catch (e) {
+    setStatus('deriveStatus', `Derive failed: ${e instanceof Error ? e.message : String(e)}. Make sure you've created a resident key first.`, 'err');
+    (btnDerive as HTMLButtonElement).disabled = false;
+    return;
   }
 
   if (!prfFirst) {
@@ -178,18 +179,28 @@ async function derive(): Promise<void> {
 const CLEAR_AFTER_SECS = 60;
 let clearTimer: ReturnType<typeof setInterval> | null = null;
 
+/**
+ * Display the passphrase in the UI and start the auto-clear timer.
+ * @param hex - The passphrase as a hexadecimal string
+ */
 function showPassphrase(hex: string): void {
   (document.getElementById('passphraseValue') as HTMLElement).textContent = hex;
   (document.getElementById('passphraseBox') as HTMLElement).style.display = 'block';
   startClearTimer();
 }
 
+/**
+ * Hide the passphrase from the UI and stop the auto-clear timer.
+ */
 function hidePassphrase(): void {
   (document.getElementById('passphraseBox') as HTMLElement).style.display = 'none';
   (document.getElementById('passphraseValue') as HTMLElement).textContent = '';
   stopClearTimer();
 }
 
+/**
+ * Start the auto-clear timer and update the countdown display.
+ */
 function startClearTimer(): void {
   stopClearTimer();
   let remaining = CLEAR_AFTER_SECS;
@@ -204,6 +215,9 @@ function startClearTimer(): void {
   }, 1000);
 }
 
+/**
+ * Stop the auto-clear timer and clear the countdown display.
+ */
 function stopClearTimer(): void {
   if (clearTimer) { clearInterval(clearTimer); clearTimer = null; }
   (document.getElementById('timerLabel') as HTMLElement).textContent = '';
@@ -211,6 +225,12 @@ function stopClearTimer(): void {
 
 // ── UI helpers ────────────────────────────────────────────────────────────────
 
+/**
+ * Set the status message and styling for a UI element.
+ * @param id - The element ID to update
+ * @param msg - The status message to display
+ * @param type - The message type: 'ok', 'err', or '' (default)
+ */
 function setStatus(id: string, msg: string, type: string): void {
   const el = document.getElementById(id) as HTMLElement;
   el.textContent = msg;
@@ -220,9 +240,11 @@ function setStatus(id: string, msg: string, type: string): void {
 
 // ── Wiring ────────────────────────────────────────────────────────────────────
 
-const btnDerive = document.getElementById('btnDerive') as HTMLButtonElement;
-const btnCopy   = document.getElementById('btnCopy') as HTMLButtonElement;
+const btnRegister = document.getElementById('btnRegister') as HTMLButtonElement;
+const btnDerive   = document.getElementById('btnDerive') as HTMLButtonElement;
+const btnCopy     = document.getElementById('btnCopy') as HTMLButtonElement;
 
+btnRegister.addEventListener('click', register);
 btnDerive.addEventListener('click', derive);
 
 (document.getElementById('entryInput') as HTMLInputElement).addEventListener('keydown', (e: KeyboardEvent) => {

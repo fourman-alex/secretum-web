@@ -19,13 +19,42 @@
         </p>
       </header>
 
+      <!-- How to use section -->
+      <div class="bg-white/10 border rounded-lg py-4 px-6 mb-4">
+        <h2 class="text-xs font-medium text-secondary mb-3 uppercase tracking-[0.07em]">How to use</h2>
+        <ol class="text-[0.8125rem] text-secondary space-y-2 list-decimal list-inside">
+          <li>Click <strong>"Create resident key"</strong> to set up a FIDO2 key on your device (one-time setup)</li>
+          <li>Enter any passphrase identifier (e.g., "github.com", "email") in the Entry field</li>
+          <li>Click <strong>"Derive passphrase"</strong> to generate a unique passphrase</li>
+          <li>Use the same device and identifier to always get the same passphrase</li>
+        </ol>
+      </div>
+
       <div
-        class="rounded-md px-4 py-3 text-[0.8125rem] mb-4 bg-[rgba(210,153,34,0.12)] border border-[rgba(210,153,34,0.35)] text-[#e3b341]"
+        class="rounded-md px-4 py-3 text-[0.8125rem] mb-4 bg-danger/10 border border-danger/35 text-danger"
         id="httpsWarning"
         style="display: none"
       >
         WebAuthn requires HTTPS or localhost. Serve this page over a secure
         origin.
+      </div>
+
+      <!-- Register card -->
+      <div class="bg-white/10 border rounded-lg py-5 px-6 mb-4">
+        <h2 class="text-xs font-medium text-secondary mb-3 uppercase tracking-[0.07em]">Setup</h2>
+        <p class="text-[0.8125rem] text-secondary mb-3">
+          Create a resident key on your FIDO2 hardware device. Do this once per device.
+        </p>
+        <button
+          class="inline-flex items-center px-3.5 py-1.75 rounded-md font-semibold cursor-pointer bg-secondary text-primary transition-colors duration-120 leading-5 hover:bg-primary hover:text-secondary disabled:opacity-45 disabled:cursor-not-allowed"
+          id="btnRegister"
+        >
+          Create resident key
+        </button>
+        <div
+          class="text-[0.8125rem] min-h-[1.2em] mt-3 text-secondary"
+          id="registerStatus"
+        ></div>
       </div>
 
       <!-- Derive card -->
