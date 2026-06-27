@@ -100,6 +100,7 @@ async function register(): Promise<void> {
           residentKey:             'required',
           userVerification:        'preferred',
         },
+        extensions: { prf: {} },
       },
     } as CredentialCreationOptions);
   } catch (e) {
