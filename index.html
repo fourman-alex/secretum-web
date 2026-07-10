@@ -11,95 +11,180 @@
   >
     <div class="w-full max-w-140">
       <header class="mb-7">
-        <h1 class="text-[1.375rem] font-semibold tracking-tight">
-          Secretum Web
-        </h1>
+        <h1 class="text-[1.375rem] font-semibold tracking-tight">Secretum Web</h1>
         <p class="text-secondary text-[0.8125rem] mt-1">
-          Deterministic passphrase from a FIDO2 hardware key — fully client-side
+          Passphrase encryption with multiple FIDO2 hardware keys — fully client-side
         </p>
       </header>
 
-      <!-- How to use section -->
-      <div class="bg-white/10 border rounded-lg py-4 px-6 mb-4">
-        <h2 class="text-xs font-medium text-secondary mb-3 uppercase tracking-[0.07em]">How to use</h2>
-        <ol class="text-[0.8125rem] text-secondary space-y-2 list-decimal list-inside">
-          <li>Click <strong>"Create resident key"</strong> to set up a FIDO2 key on your device (one-time setup)</li>
-          <li>Enter any passphrase identifier (e.g., "github.com", "email") in the Entry field</li>
-          <li>Click <strong>"Derive passphrase"</strong> to generate a unique passphrase</li>
-          <li>Use the same device and identifier to always get the same passphrase</li>
-        </ol>
-      </div>
-
       <div
-        class="rounded-md px-4 py-3 text-[0.8125rem] mb-4 bg-danger/10 border border-danger/35 text-danger"
         id="httpsWarning"
+        class="rounded-md px-4 py-3 text-[0.8125rem] mb-4 bg-danger/10 border border-danger/35 text-danger"
         style="display: none"
       >
-        WebAuthn requires HTTPS or localhost. Serve this page over a secure
-        origin.
+        WebAuthn requires HTTPS or localhost. Serve this page over a secure origin.
       </div>
 
-      <!-- Register card -->
-      <div class="bg-white/10 border rounded-lg py-5 px-6 mb-4">
-        <h2 class="text-xs font-medium text-secondary mb-3 uppercase tracking-[0.07em]">Setup</h2>
-        <p class="text-[0.8125rem] text-secondary mb-3">
-          Create a resident key on your FIDO2 hardware device. Do this once per device.
-        </p>
+      <!-- Tab switcher -->
+      <div class="flex bg-white/5 p-1 rounded-lg gap-1 mb-4">
         <button
-          class="inline-flex items-center px-3.5 py-1.75 rounded-md font-semibold cursor-pointer bg-secondary text-primary transition-colors duration-120 leading-5 hover:bg-primary hover:text-secondary disabled:opacity-45 disabled:cursor-not-allowed"
-          id="btnRegister"
+          id="tabEncrypt"
+          class="flex-1 py-1.5 rounded-md text-sm font-semibold transition-colors duration-120 bg-secondary text-primary"
         >
-          Create resident key
+          Encrypt
         </button>
-        <div
-          class="text-[0.8125rem] min-h-[1.2em] mt-3 text-secondary"
-          id="registerStatus"
-        ></div>
+        <button
+          id="tabDecrypt"
+          class="flex-1 py-1.5 rounded-md text-sm font-semibold transition-colors duration-120 text-secondary"
+        >
+          Decrypt
+        </button>
       </div>
 
-      <!-- Derive card -->
-      <div class="bg-white/10 border rounded-lg py-5 px-6 mb-4">
-        <div class="mb-4">
-          <label
-            for="entryInput"
-            class="block text-xs font-medium text-secondary mb-1.5 uppercase tracking-[0.07em]"
-            >Entry</label
-          >
-          <input
-            type="text"
-            id="entryInput"
-            class="w-full bg-secondary/95 border rounded-md py-1.75 px-3 text-sm font-mono text-primary outline-none focus:border-primary transition-colors duration-120 placeholder:text-primary/40"
-            placeholder="e.g. github.com"
+      <!-- ══ ENCRYPT PANEL ════════════════════════════════════════════════════ -->
+      <div id="panelEncrypt">
+
+        <!-- Passphrase -->
+        <div class="bg-white/10 border rounded-lg py-5 px-6 mb-4">
+          <h2 class="text-xs font-medium text-secondary mb-3 uppercase tracking-[0.07em]">
+            Passphrase to encrypt
+          </h2>
+          <textarea
+            id="passphraseInput"
+            rows="4"
+            class="w-full bg-secondary/95 border rounded-md py-1.75 px-3 text-sm font-mono text-primary outline-none focus:border-primary transition-colors duration-120 placeholder:text-primary/40 resize-none"
+            placeholder="Enter the passphrase to encrypt…"
             autocomplete="off"
             spellcheck="false"
-          />
+          ></textarea>
+        </div>
+
+        <!-- Hardware keys -->
+        <div class="bg-white/10 border rounded-lg py-5 px-6 mb-4">
+          <div class="flex items-center justify-between mb-3">
+            <h2 class="text-xs font-medium text-secondary uppercase tracking-[0.07em]">
+              Hardware Keys
+            </h2>
+            <button
+              id="btnAddKey"
+              class="inline-flex items-center px-3 py-1 rounded-md text-xs font-semibold cursor-pointer bg-secondary text-primary transition-colors duration-120 hover:bg-primary hover:text-secondary disabled:hover:bg-secondary disabled:hover:text-primary disabled:opacity-45 disabled:cursor-not-allowed"
+            >
+              + Add Key
+            </button>
+          </div>
+
+          <div id="keyList"></div>
+
+          <p class="text-[0.75rem] text-secondary mt-3">
+            Any listed key can later decrypt the file independently.
+          </p>
         </div>
 
         <button
-          class="inline-flex items-center px-3.5 py-1.75 rounded-md font-semibold cursor-pointer bg-secondary text-primary transition-colors duration-120 leading-5 hover:bg-primary hover:text-secondary disabled:opacity-45 disabled:cursor-not-allowed"
-          id="btnDerive"
+          id="btnEncrypt"
+          disabled
+          class="w-full py-2 rounded-md font-semibold cursor-pointer bg-secondary text-primary transition-colors duration-120 hover:bg-primary hover:text-secondary disabled:hover:bg-secondary disabled:hover:text-primary disabled:opacity-45 disabled:cursor-not-allowed"
         >
-          Derive passphrase
+          Encrypt &amp; Download
         </button>
 
         <div
+          id="encryptStatus"
+          class="text-[0.8125rem] min-h-[1.2em] mt-3 text-primary/60"
+        ></div>
+
+        <!-- First-time setup (collapsed) -->
+        <details class="mt-5">
+          <summary
+            class="text-xs text-secondary cursor-pointer select-none duration-120"
+          >
+            First time? Create a resident key on your hardware device →
+          </summary>
+          <div class="mt-3 bg-white/10 border rounded-lg py-4 px-5">
+            <p class="text-[0.8125rem] text-secondary mb-3">
+              Create a resident (discoverable) credential on your FIDO2 hardware key.
+              Only needed once per physical device. Requires a PRF-capable key
+              (e.g. YubiKey 5) and Chrome 116+.
+            </p>
+            <button
+              id="btnRegister"
+              class="inline-flex items-center px-3.5 py-1.75 rounded-md font-semibold cursor-pointer bg-secondary text-primary transition-colors duration-120 leading-5 hover:bg-primary hover:text-secondary disabled:hover:bg-secondary disabled:hover:text-primary disabled:opacity-45 disabled:cursor-not-allowed"
+            >
+              Register Key
+            </button>
+            <div
+              id="registerStatus"
+              class="text-[0.8125rem] min-h-[1.2em] mt-3 text-primary/60"
+            ></div>
+          </div>
+        </details>
+      </div>
+
+      <!-- ══ DECRYPT PANEL ════════════════════════════════════════════════════ -->
+      <div id="panelDecrypt" style="display: none">
+
+        <!-- Import encrypted file -->
+        <div class="bg-white/10 border rounded-lg py-5 px-6 mb-4">
+          <h2 class="text-xs font-medium text-secondary mb-3 uppercase tracking-[0.07em]">
+            Import Encrypted File
+          </h2>
+
+          <!-- Drop zone -->
+          <div
+            id="dropZone"
+            class="border-2 border-dashed border-primary rounded-lg p-6 text-center cursor-pointer transition-colors duration-120 mb-3"
+          >
+            <p class="text-[0.8125rem] text-secondary">
+              Drop a <span class="font-mono">.secretum.json</span> file here,
+              or <span class="underline">click to browse</span>
+            </p>
+            <input type="file" id="fileInput" accept=".json" class="hidden" />
+          </div>
+
+          <p class="text-xs text-secondary mb-1.5">Or paste encrypted file JSON:</p>
+          <textarea
+            id="fileTextarea"
+            rows="5"
+            class="w-full bg-secondary/95 border rounded-md py-1.75 px-3 text-[0.75rem] font-mono text-primary outline-none focus:border-primary transition-colors duration-120 placeholder:text-primary/40 resize-none"
+            placeholder='{"iv":"…","recipients":[{"kid":"…","prf_nonce":"…","encrypted_key":"…"}],"ciphertext":"…"}'
+            spellcheck="false"
+            autocomplete="off"
+          ></textarea>
+
+          <div
+            id="fileInfo"
+            class="mt-3 bg-white/5 rounded-md px-4 py-3"
+            style="display: none"
+          ></div>
+        </div>
+
+        <button
+          id="btnDecrypt"
+          disabled
+          class="w-full py-2 rounded-md font-semibold cursor-pointer bg-secondary text-primary transition-colors duration-120 hover:bg-primary hover:text-secondary disabled:hover:bg-secondary disabled:hover:text-primary disabled:opacity-45 disabled:cursor-not-allowed"
+        >
+          Decrypt
+        </button>
+
+        <!-- Result -->
+        <div
+          id="decryptResult"
           class="mt-4 bg-white/20 border border-primary/20 rounded-md p-4"
-          id="passphraseBox"
           style="display: none"
         >
           <div class="text-xs text-secondary mb-2">
-            Derived passphrase (hex · 64 chars · auto-clears in
-            <span id="timerSecs">60</span>s)
+            Decrypted passphrase (auto-clears in
+            <span id="decryptTimerSecs">60</span>s)
           </div>
           <div
-            class="font-mono text-sm break-all text-secondary tracking-[0.03em]"
-            id="passphraseValue"
+            id="decryptValue"
+            class="font-mono text-sm break-all text-secondary tracking-[0.03em] whitespace-pre-wrap"
           ></div>
           <div class="flex justify-between items-center mt-3">
-            <span class="text-xs text-secondary" id="timerLabel"></span>
+            <span id="decryptTimerLabel" class="text-xs text-secondary"></span>
             <button
-              class="inline-flex items-center px-3.5 py-1.75 rounded-md font-semibold cursor-pointer bg-secondary text-primary transition-colors duration-120 leading-5 hover:bg-primary hover:text-secondary disabled:opacity-45 disabled:cursor-not-allowed"
-              id="btnCopy"
+              id="btnDecryptCopy"
+              class="inline-flex items-center px-3.5 py-1.75 rounded-md font-semibold cursor-pointer bg-secondary text-primary transition-colors duration-120 leading-5 hover:bg-primary hover:text-secondary"
             >
               Copy
             </button>
@@ -107,8 +192,8 @@
         </div>
 
         <div
-          class="text-[0.8125rem] min-h-[1.2em] mt-3 text-secondary"
-          id="deriveStatus"
+          id="decryptStatus"
+          class="text-[0.8125rem] min-h-[1.2em] mt-3 text-primary/60"
         ></div>
       </div>
     </div>

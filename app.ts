@@ -1,96 +1,114 @@
-// Relying party ID — must match exactly between setup and derive.
-// Bound to the origin, so same key + same entry = same passphrase on any machine.
+// Secretum Web – UI wiring for passphrase encryption / decryption with FIDO2 hardware keys.
+import {
+  b64uEncode,
+  randomBytes,
+  prfInputFor,
+  deriveKEK,
+  generateDEK,
+  buildEncryptedFile,
+  validateEncryptedFile,
+  decryptEncryptedFile,
+  type EncryptedFile,
+  type Recipient,
+  type StoredKey,
+} from './crypto.js';
+
 const RP_ID = window.location.hostname || 'localhost';
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// Static user handle for the project's single logical user. Keeping this stable
+// prevents creating duplicate resident keys every time registration is run.
+const USER_ID = new Uint8Array([0x73, 0x65, 0x63, 0x72, 0x65, 0x74, 0x75, 0x6d]); // "secretum"
 
-/**
- * Generate random bytes using the Web Crypto API.
- * @param n - The number of random bytes to generate
- * @returns A Uint8Array containing random bytes
- */
-function randomBytes(n: number): Uint8Array {
-  const buf = new Uint8Array(n);
-  crypto.getRandomValues(buf);
-  return buf;
+// ── State ──────────────────────────────────────────────────────────────────────
+
+const storedKeys: StoredKey[] = [];
+let dek: CryptoKey | null = null;
+let importedFile: EncryptedFile | null = null;
+let decryptClearTimer: ReturnType<typeof setInterval> | null = null;
+
+// ── DOM refs ───────────────────────────────────────────────────────────────────
+
+const panelEncrypt   = document.getElementById('panelEncrypt')      as HTMLElement;
+const panelDecrypt   = document.getElementById('panelDecrypt')      as HTMLElement;
+const tabEncryptBtn  = document.getElementById('tabEncrypt')        as HTMLButtonElement;
+const tabDecryptBtn  = document.getElementById('tabDecrypt')        as HTMLButtonElement;
+const keyListEl      = document.getElementById('keyList')           as HTMLElement;
+const btnAddKey      = document.getElementById('btnAddKey')         as HTMLButtonElement;
+const btnEncrypt     = document.getElementById('btnEncrypt')        as HTMLButtonElement;
+const encryptStatusEl = document.getElementById('encryptStatus')   as HTMLElement;
+const btnRegister    = document.getElementById('btnRegister')       as HTMLButtonElement;
+const registerStatusEl = document.getElementById('registerStatus') as HTMLElement;
+const fileInput      = document.getElementById('fileInput')         as HTMLInputElement;
+const dropZone       = document.getElementById('dropZone')          as HTMLElement;
+const fileTextarea   = document.getElementById('fileTextarea')      as HTMLTextAreaElement;
+const fileInfoEl     = document.getElementById('fileInfo')          as HTMLElement;
+const btnDecrypt     = document.getElementById('btnDecrypt')        as HTMLButtonElement;
+const decryptStatusEl = document.getElementById('decryptStatus')   as HTMLElement;
+const decryptResultEl = document.getElementById('decryptResult')   as HTMLElement;
+const decryptValueEl  = document.getElementById('decryptValue')    as HTMLElement;
+const decryptSecsEl   = document.getElementById('decryptTimerSecs') as HTMLElement;
+const decryptLabelEl  = document.getElementById('decryptTimerLabel') as HTMLElement;
+const btnDecryptCopy  = document.getElementById('btnDecryptCopy')  as HTMLButtonElement;
+
+// ── UI helpers ─────────────────────────────────────────────────────────────────
+
+function setEncStatus(msg: string, type: '' | 'ok' | 'err'): void {
+  encryptStatusEl.textContent = msg;
+  encryptStatusEl.className = `text-[0.8125rem] min-h-[1.2em] mt-3 ${
+    type === 'ok' ? 'text-success' : type === 'err' ? 'text-danger' : 'text-primary/60'
+  }`;
 }
 
-/**
- * Convert an ArrayBuffer to a hexadecimal string.
- * @param buf - The ArrayBuffer to encode
- * @returns A lowercase hex string representation
- */
-function hexEncode(buf: ArrayBuffer): string {
-  return Array.from(new Uint8Array(buf))
-    .map(b => b.toString(16).padStart(2, '0')).join('');
+function setDecStatus(msg: string, type: '' | 'ok' | 'err'): void {
+  decryptStatusEl.textContent = msg;
+  decryptStatusEl.className = `text-[0.8125rem] min-h-[1.2em] mt-3 ${
+    type === 'ok' ? 'text-success' : type === 'err' ? 'text-danger' : 'text-primary/60'
+  }`;
 }
 
-/**
- * Compute the SHA-256 hash of a string.
- * @param str - The string to hash
- * @returns A Promise resolving to the SHA-256 hash as an ArrayBuffer
- */
-async function sha256Bytes(str: string): Promise<ArrayBuffer> {
-  return crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+function setRegStatus(msg: string, type: '' | 'ok' | 'err'): void {
+  registerStatusEl.textContent = msg;
+  registerStatusEl.className = `text-[0.8125rem] min-h-[1.2em] mt-3 ${
+    type === 'ok' ? 'text-success' : type === 'err' ? 'text-danger' : 'text-primary/60'
+  }`;
 }
 
-/**
- * Compute the entry PRF input for HKDF-SHA256.
- * Mirrors the CLI's entryHMACSalt: sha256("secretum:entry:" + entry)
- * @param entry - The entry name
- * @returns A Promise resolving to the entry PRF input as an ArrayBuffer
- */
-async function entryPRFInput(entry: string): Promise<ArrayBuffer> {
-  return sha256Bytes('secretum:entry:' + entry);
+// ── Tab switching ──────────────────────────────────────────────────────────────
+
+const TAB_ACTIVE   = 'flex-1 py-1.5 rounded-md text-sm font-semibold transition-colors duration-120 bg-secondary text-primary';
+const TAB_INACTIVE = 'flex-1 py-1.5 rounded-md text-sm font-semibold transition-colors duration-120 text-secondary';
+
+async function ensureDEK(): Promise<void> {
+  if (dek) return;
+  dek = await generateDEK();
 }
 
-// ── HKDF-SHA256 ───────────────────────────────────────────────────────────────
+function switchTab(tab: 'encrypt' | 'decrypt'): void {
+  const enc = tab === 'encrypt';
+  panelEncrypt.style.display = enc ? '' : 'none';
+  panelDecrypt.style.display = enc ? 'none' : '';
+  tabEncryptBtn.className    = enc ? TAB_ACTIVE   : TAB_INACTIVE;
+  tabDecryptBtn.className    = enc ? TAB_INACTIVE : TAB_ACTIVE;
 
-/**
- * Derive a 256-bit key using HKDF-SHA256.
- * Mirrors the CLI's kdf.Derive exactly:
- * - IKM  = PRF/hmac-secret output from the hardware key
- * - salt = SHA-256("secretum:kdf-salt:v1")
- * - info = "secretum-v1-passphrase:" + entry
- * - OKM  = 32 bytes → 64-char hex passphrase
- * @param ikmBuf - The input key material from the hardware device
- * @param entry - The entry name for info parameter
- * @returns A Promise resolving to the derived key material (256 bits)
- */
-async function hkdfDerive(ikmBuf: BufferSource, entry: string): Promise<ArrayBuffer> {
-  const hkdfSalt = await sha256Bytes('secretum:kdf-salt:v1');
-  const ikm = await crypto.subtle.importKey(
-    'raw', ikmBuf, { name: 'HKDF' }, false, ['deriveBits']
-  );
-  return crypto.subtle.deriveBits(
-    {
-      name: 'HKDF',
-      hash: 'SHA-256',
-      salt: hkdfSalt,
-      info: new TextEncoder().encode('secretum-v1-passphrase:' + entry),
-    },
-    ikm,
-    256,
-  );
+  if (enc) {
+    ensureDEK();
+  }
 }
 
-// ── Register ──────────────────────────────────────────────────────────────────
+tabEncryptBtn.addEventListener('click', () => switchTab('encrypt'));
+tabDecryptBtn.addEventListener('click', () => switchTab('decrypt'));
 
-/**
- * Create a resident key on the FIDO2 hardware device.
- * @returns A Promise that resolves when registration is complete
- */
-async function register(): Promise<void> {
-  setStatus('registerStatus', 'Touch your key when it blinks…', '');
-  (btnRegister as HTMLButtonElement).disabled = true;
+// ── Register (one-time setup) ──────────────────────────────────────────────────
 
-  let cred: Credential | null;
+btnRegister.addEventListener('click', async () => {
+  btnRegister.disabled = true;
+  setRegStatus('Touch your key when it blinks…', '');
   try {
-    cred = await navigator.credentials.create({
+    await navigator.credentials.create({
       publicKey: {
         challenge:        randomBytes(32).buffer,
         rp:               { id: RP_ID, name: 'Secretum Web' },
-        user:             { id: randomBytes(32).buffer, name: 'secretum', displayName: 'Secretum' },
+        user:             { id: USER_ID, name: 'secretum', displayName: 'Secretum' },
         pubKeyCredParams: [
           { type: 'public-key', alg: -7   },  // ES256
           { type: 'public-key', alg: -257 },  // RS256
@@ -103,163 +121,246 @@ async function register(): Promise<void> {
         extensions: { prf: {} },
       },
     } as CredentialCreationOptions);
+    setRegStatus('Resident key created. You can now click "Add Key" above.', 'ok');
   } catch (e) {
-    setStatus('registerStatus', `Registration failed: ${e instanceof Error ? e.message : String(e)}`, 'err');
-    (btnRegister as HTMLButtonElement).disabled = false;
+    setRegStatus(`Registration failed: ${e instanceof Error ? e.message : String(e)}`, 'err');
+  } finally {
+    btnRegister.disabled = false;
+  }
+});
+
+// ── Encrypt panel: key management ─────────────────────────────────────────────
+
+function renderKeyList(): void {
+  keyListEl.innerHTML = '';
+  if (storedKeys.length === 0) {
+    const p = document.createElement('p');
+    p.className = 'text-[0.8125rem] text-secondary';
+    p.textContent = 'No keys added yet. Add at least one hardware key to enable encryption.';
+    keyListEl.appendChild(p);
+    btnEncrypt.disabled = true;
     return;
   }
 
-  setStatus('registerStatus', 'Resident key created successfully.', 'ok');
-  (btnRegister as HTMLButtonElement).disabled = false;
+  const ul = document.createElement('ul');
+  ul.className = 'space-y-2';
+
+  storedKeys.forEach((k, i) => {
+    const li = document.createElement('li');
+    li.className = 'flex items-center justify-between bg-white/5 rounded-md px-3 py-2';
+
+    const span = document.createElement('span');
+    span.className = 'font-mono text-[0.8125rem] text-secondary';
+    span.textContent = k.label;
+
+    const btn = document.createElement('button');
+    btn.className = 'text-xs text-danger hover:underline cursor-pointer ml-3 shrink-0';
+    btn.textContent = 'Remove';
+    btn.addEventListener('click', () => { storedKeys.splice(i, 1); renderKeyList(); });
+
+    li.appendChild(span);
+    li.appendChild(btn);
+    ul.appendChild(li);
+  });
+
+  keyListEl.appendChild(ul);
+  btnEncrypt.disabled = false;
 }
 
-// ── Derive ────────────────────────────────────────────────────────────────────
-
-/**
- * Derive a passphrase from a registered resident key.
- * Requires the key to be already registered (use the register function to create one).
- * Same key + same entry = same passphrase everywhere. Nothing stored locally.
- * @returns A Promise that resolves when derivation is complete
- */
-async function derive(): Promise<void> {
-  const entry = (document.getElementById('entryInput') as HTMLInputElement).value.trim();
-  if (!entry) {
-    setStatus('deriveStatus', 'Enter an entry name first.', 'err');
-    (document.getElementById('entryInput') as HTMLInputElement).focus();
-    return;
-  }
-
-  const prfInput = await entryPRFInput(entry);
-
-  setStatus('deriveStatus', 'Touch your key when it blinks…', '');
-  (btnDerive as HTMLButtonElement).disabled = true;
-  hidePassphrase();
-
-  // Get the credential from the registered resident key
-  let prfFirst: ArrayBuffer | null = null;
-
+btnAddKey.addEventListener('click', async () => {
+  btnAddKey.disabled = true;
+  setEncStatus('Touch your hardware key…', '');
   try {
-    const assertion = await navigator.credentials.get({
+    await ensureDEK();
+    if (!dek) throw new Error('DEK not ready.');
+
+    const prfNonce = randomBytes(32);
+    const prfInput = await prfInputFor(prfNonce);
+
+    const raw = await navigator.credentials.get({
       publicKey: {
         challenge:        randomBytes(32).buffer,
         rpId:             RP_ID,
         userVerification: 'preferred',
-        extensions: { prf: { eval: { first: prfInput } } },
+        extensions:       { prf: { eval: { first: prfInput } } },
       },
     } as CredentialRequestOptions);
 
-    if (!assertion || !(assertion instanceof PublicKeyCredential)) {
-      throw new Error('Invalid credential type');
+    if (!raw || !(raw instanceof PublicKeyCredential)) throw new Error('Unexpected credential type.');
+
+    const ext = raw.getClientExtensionResults() as { prf?: { results?: { first?: ArrayBuffer } } };
+    if (!ext.prf?.results?.first) {
+      throw new Error(
+        'Key did not return PRF results. Use a PRF-capable key.',
+      );
     }
 
-    prfFirst = (assertion.getClientExtensionResults()?.prf?.results?.first ?? null) as ArrayBuffer | null;
+    const kid = b64uEncode(raw.rawId);
+    if (storedKeys.some(k => b64uEncode(k.credentialId) === kid)) {
+      setEncStatus('This key is already in the list.', 'err');
+      return;
+    }
+
+    const kek = await deriveKEK(ext.prf.results.first);
+    const wrappedDEK = await crypto.subtle.wrapKey('raw', dek, kek, 'AES-KW');
+
+    const recipient: Recipient = {
+      kid,
+      prf_nonce: b64uEncode(prfNonce),
+      encrypted_key: b64uEncode(wrappedDEK),
+    };
+
+    const label = `···${kid.slice(-12)}`;
+    storedKeys.push({ credentialId: raw.rawId, label, recipient });
+    renderKeyList();
+    setEncStatus(`Key added (${label}).`, 'ok');
   } catch (e) {
-    setStatus('deriveStatus', `Derive failed: ${e instanceof Error ? e.message : String(e)}. Make sure you've created a resident key first.`, 'err');
-    (btnDerive as HTMLButtonElement).disabled = false;
+    const msg = e instanceof Error ? e.message : String(e);
+    setEncStatus(`Could not add key: ${msg}`, 'err');
+  } finally {
+    btnAddKey.disabled = false;
+  }
+});
+
+// ── Encrypt & Download ─────────────────────────────────────────────────────────
+
+btnEncrypt.addEventListener('click', async () => {
+  const passphrase = (document.getElementById('passphraseInput') as HTMLTextAreaElement).value;
+
+  if (!passphrase) { setEncStatus('Enter a passphrase to encrypt.', 'err'); return; }
+
+  if (!dek || storedKeys.length === 0) {
+    setEncStatus('Add at least one hardware key before encrypting.', 'err');
     return;
   }
 
-  if (!prfFirst) {
-    setStatus(
-      'deriveStatus',
-      'PRF result not returned. Ensure both the key and browser support the PRF/hmac-secret extension.',
-      'err',
-    );
-    (btnDerive as HTMLButtonElement).disabled = false;
+  btnEncrypt.disabled = true;
+  btnAddKey.disabled  = true;
+
+  try {
+    const recipients = storedKeys.map(k => k.recipient);
+    const file = await buildEncryptedFile(passphrase, recipients, dek);
+
+    const blob = new Blob([JSON.stringify(file, null, 2)], { type: 'application/json' });
+    const url  = URL.createObjectURL(blob);
+    const a    = Object.assign(document.createElement('a'), { href: url, download: 'passphrase.secretum.json' });
+    a.click();
+    URL.revokeObjectURL(url);
+
+    setEncStatus('Encrypted and downloaded successfully.', 'ok');
+  } catch (e) {
+    setEncStatus(`Encryption failed: ${e instanceof Error ? e.message : String(e)}`, 'err');
+  } finally {
+    btnEncrypt.disabled = storedKeys.length === 0;
+    btnAddKey.disabled  = false;
+  }
+});
+
+// ── Decrypt panel ──────────────────────────────────────────────────────────────
+
+function loadEncryptedFileText(text: string): void {
+  if (!text.trim()) {
+    importedFile = null;
+    fileInfoEl.style.display = 'none';
+    btnDecrypt.disabled = true;
     return;
   }
+  try {
+    const file = validateEncryptedFile(JSON.parse(text));
+    const nKeys = file.recipients.length;
 
-  const passphrase = hexEncode(await hkdfDerive(prfFirst, entry));
-  showPassphrase(passphrase);
-  setStatus('deriveStatus', '', '');
-  (btnDerive as HTMLButtonElement).disabled = false;
+    fileInfoEl.innerHTML = '';
+    const p = document.createElement('p');
+    p.className = 'text-[0.8125rem] text-secondary';
+    p.innerHTML =
+      `<strong>${nKeys}</strong> hardware key${nKeys !== 1 ? 's' : ''} can decrypt this file.`;
+    fileInfoEl.appendChild(p);
+    fileInfoEl.style.display = '';
+    importedFile = file;
+    btnDecrypt.disabled = false;
+    setDecStatus('', '');
+  } catch (e) {
+    importedFile = null;
+    fileInfoEl.style.display = 'none';
+    btnDecrypt.disabled = true;
+    setDecStatus(`Invalid encrypted file: ${e instanceof Error ? e.message : String(e)}`, 'err');
+  }
 }
 
-// ── Passphrase display + auto-clear timer ─────────────────────────────────────
-
-const CLEAR_AFTER_SECS = 60;
-let clearTimer: ReturnType<typeof setInterval> | null = null;
-
-/**
- * Display the passphrase in the UI and start the auto-clear timer.
- * @param hex - The passphrase as a hexadecimal string
- */
-function showPassphrase(hex: string): void {
-  (document.getElementById('passphraseValue') as HTMLElement).textContent = hex;
-  (document.getElementById('passphraseBox') as HTMLElement).style.display = 'block';
-  startClearTimer();
+function readFileAsText(file: File): void {
+  const reader = new FileReader();
+  reader.onload = ev => {
+    const text = ev.target?.result as string;
+    fileTextarea.value = text;
+    loadEncryptedFileText(text);
+  };
+  reader.readAsText(file);
 }
 
-/**
- * Hide the passphrase from the UI and stop the auto-clear timer.
- */
-function hidePassphrase(): void {
-  (document.getElementById('passphraseBox') as HTMLElement).style.display = 'none';
-  (document.getElementById('passphraseValue') as HTMLElement).textContent = '';
-  stopClearTimer();
-}
+dropZone.addEventListener('click', () => fileInput.click());
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('border-secondary/60'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('border-secondary/60'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropZone.classList.remove('border-secondary/60');
+  const file = e.dataTransfer?.files[0];
+  if (file) readFileAsText(file);
+});
+fileInput.addEventListener('change', () => { const f = fileInput.files?.[0]; if (f) readFileAsText(f); });
+fileTextarea.addEventListener('input', () => loadEncryptedFileText(fileTextarea.value));
 
-/**
- * Start the auto-clear timer and update the countdown display.
- */
-function startClearTimer(): void {
-  stopClearTimer();
-  let remaining = CLEAR_AFTER_SECS;
-  const secsEl  = document.getElementById('timerSecs') as HTMLElement;
-  const labelEl = document.getElementById('timerLabel') as HTMLElement;
-  secsEl.textContent = remaining.toString();
-  clearTimer = setInterval(() => {
+btnDecrypt.addEventListener('click', async () => {
+  if (!importedFile) { setDecStatus('Import an encrypted file first.', 'err'); return; }
+  btnDecrypt.disabled = true;
+  hideDecryptResult();
+
+  try {
+    if (!importedFile) throw new Error('No encrypted file loaded.');
+
+    setDecStatus('Touch your hardware key…', '');
+    const { plaintext } = await decryptEncryptedFile(importedFile);
+
+    showDecryptResult(plaintext);
+    setDecStatus('', '');
+  } catch (e) {
+    setDecStatus(`Decryption failed: ${e instanceof Error ? e.message : String(e)}`, 'err');
+  } finally {
+    btnDecrypt.disabled = !importedFile;
+  }
+});
+
+function showDecryptResult(passphrase: string): void {
+  decryptValueEl.textContent = passphrase;
+  decryptResultEl.style.display = '';
+  let remaining = 60;
+  decryptSecsEl.textContent  = remaining.toString();
+  decryptLabelEl.textContent = `Clears in ${remaining}s`;
+  if (decryptClearTimer) clearInterval(decryptClearTimer);
+  decryptClearTimer = setInterval(() => {
     remaining -= 1;
-    secsEl.textContent = remaining.toString();
-    labelEl.textContent = `Clears in ${remaining}s`;
-    if (remaining <= 0) hidePassphrase();
+    decryptSecsEl.textContent  = remaining.toString();
+    decryptLabelEl.textContent = `Clears in ${remaining}s`;
+    if (remaining <= 0) hideDecryptResult();
   }, 1000);
 }
 
-/**
- * Stop the auto-clear timer and clear the countdown display.
- */
-function stopClearTimer(): void {
-  if (clearTimer) { clearInterval(clearTimer); clearTimer = null; }
-  (document.getElementById('timerLabel') as HTMLElement).textContent = '';
+function hideDecryptResult(): void {
+  decryptResultEl.style.display = 'none';
+  decryptValueEl.textContent    = '';
+  decryptLabelEl.textContent    = '';
+  if (decryptClearTimer) { clearInterval(decryptClearTimer); decryptClearTimer = null; }
 }
 
-// ── UI helpers ────────────────────────────────────────────────────────────────
-
-/**
- * Set the status message and styling for a UI element.
- * @param id - The element ID to update
- * @param msg - The status message to display
- * @param type - The message type: 'ok', 'err', or '' (default)
- */
-function setStatus(id: string, msg: string, type: string): void {
-  const el = document.getElementById(id) as HTMLElement;
-  el.textContent = msg;
-  const colorClass = type === 'ok' ? 'text-success' : type === 'err' ? 'text-danger' : 'text-primary/60';
-  el.className = `text-[0.8125rem] min-h-[1.2em] mt-3 ${colorClass}`;
-}
-
-// ── Wiring ────────────────────────────────────────────────────────────────────
-
-const btnRegister = document.getElementById('btnRegister') as HTMLButtonElement;
-const btnDerive   = document.getElementById('btnDerive') as HTMLButtonElement;
-const btnCopy     = document.getElementById('btnCopy') as HTMLButtonElement;
-
-btnRegister.addEventListener('click', register);
-btnDerive.addEventListener('click', derive);
-
-(document.getElementById('entryInput') as HTMLInputElement).addEventListener('keydown', (e: KeyboardEvent) => {
-  if (e.key === 'Enter') derive();
+btnDecryptCopy.addEventListener('click', async () => {
+  await navigator.clipboard.writeText(decryptValueEl.textContent ?? '');
+  btnDecryptCopy.textContent = 'Copied!';
+  setTimeout(() => { btnDecryptCopy.textContent = 'Copy'; }, 2000);
 });
 
-btnCopy.addEventListener('click', async () => {
-  const val = (document.getElementById('passphraseValue') as HTMLElement).textContent || '';
-  await navigator.clipboard.writeText(val);
-  btnCopy.textContent = 'Copied!';
-  setTimeout(() => { btnCopy.textContent = 'Copy'; }, 2000);
-});
+// ── Init ───────────────────────────────────────────────────────────────────────
 
-// Warn if not on a secure origin (WebAuthn won't work).
+renderKeyList();
+
 if (location.protocol !== 'https:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
-  (document.getElementById('httpsWarning') as HTMLElement).style.display = 'block';
+  (document.getElementById('httpsWarning') as HTMLElement).style.display = '';
 }

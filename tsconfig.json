@@ -18,6 +18,6 @@
     "strictNullChecks": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["app.ts"],
+  "include": ["app.ts", "crypto.ts"],
   "exclude": ["node_modules"]
 }

@@ -1,125 +1,126 @@
 # Secretum Web
 
-Deterministic passphrase generation from a FIDO2 hardware key — fully client-side.
+Passphrase encryption with multiple FIDO2 hardware keys — fully client-side.
 
 ## Description
 
-Secretum Web is a web-based application that generates cryptographically secure, deterministic passphrases from your FIDO2 hardware security key. The same hardware key + same entry name will always produce the same passphrase on any machine, making it a portable password manager that requires no server or local storage.
+Secretum Web encrypts an arbitrary passphrase (or any secret text) using your FIDO2 hardware security key and produces a compact **JSON** file. Multiple hardware keys can be enrolled so that any one of them can independently decrypt the file. All cryptography runs in the browser using the Web Crypto API — nothing is sent to any server.
 
 ### How It Works
 
-1. You provide an entry name (e.g., `github.com`)
-2. The app uses WebAuthn to authenticate with your FIDO2 hardware key
-3. The key's PRF (Pseudo-Random Function) output is derived using HKDF-SHA256
-4. A deterministic 64-character hexadecimal passphrase is generated
-5. The passphrase is displayed for a limited time (auto-clears after 60 seconds)
+**Encryption**
+1. A random 256-bit **Data Encryption Key (DEK)** is generated.
+2. The passphrase is encrypted with the DEK using **AES-256-GCM**.
+3. For each enrolled hardware key:
+   - WebAuthn's **PRF extension** (`hmac-secret`) is invoked with a unique random nonce.
+   - The PRF output is stretched into a **Key Encryption Key (KEK)** via **HKDF-SHA-256**.
+   - The DEK is **wrapped** with the KEK using **AES-KW**.
+4. A compact **JSON file** is assembled and downloaded.
 
-**Security Model:**
-- No passphrases, credentials, or keys are stored locally or on any server
-- All cryptography happens in your browser using the Web Crypto API
-- The relying party ID is bound to the origin, so the same setup works across machines
-- No tracking, no analytics, no external dependencies
+**Decryption**
+1. Load the encrypted JSON file (file upload or paste).
+2. Touch any enrolled hardware key → PRF output → re-derive KEK → **unwrap DEK** → **decrypt** passphrase.
+3. The decrypted passphrase is displayed and auto-clears after 60 seconds.
 
-## Capabilities
-
-- **Generate Passphrases**: Create deterministic passwords from hardware key + entry name
-- **Register Keys**: First-time users automatically register their FIDO2 key (one-time per device)
-- **Client-Side Only**: All operations run entirely in your browser
-- **Fast Re-Auth**: Subsequent derivations require only one touch after initial registration
-- **Auto-Clear**: Passphrases automatically clear from display after 60 seconds for security
-- **Copy to Clipboard**: One-click copy of the generated passphrase
-- **HTTPS Required**: Uses modern WebAuthn standards (Chrome 116+, compatible FIDO2 keys)
-
-### Supported Hardware
-
-- FIDO2 security keys with HMAC-secret support (e.g., Yubikey 5, Titan Security Key)
-- Requires WebAuthn PRF extension support
-- Browser: Chrome/Chromium 116+, Edge, and other Chromium-based browsers
+**Security Model**
+- No passphrase, key material, or encrypted file content is ever stored locally or transmitted to a server.
+- All cryptography is performed in the browser (Web Crypto API).
+- The auto-clear timer limits the passphrase exposure window to 60 seconds.
 
 ## Getting Started
 
 ### Prerequisites
 
 - Node.js 18+
-- npm or yarn
-- A FIDO2 hardware security key (with PRF/HMAC-secret support)
+- A PRF-capable FIDO2 hardware key (e.g. YubiKey 5 series)
+- Chrome / Chromium 116+ (required for WebAuthn PRF extension)
 
 ### Installation
 
 ```bash
-# Clone the repository
 git clone <repository-url>
 cd secretum-web
-
-# Install dependencies
 npm install
 ```
 
 ### Local Development
 
 ```bash
-# Start the dev server (opens automatically at localhost:5173)
-npm run dev
+npm run dev          # dev server at http://localhost:5173
 ```
-
-The application will be available at `http://localhost:5173`. Due to WebAuthn requirements, it must be served over `http://localhost` or `https://`.
 
 ### Build for Production
 
 ```bash
-# Build and check TypeScript
-npm run build
+npm run build        # outputs to dist/
+npm run preview      # preview the production build
 ```
 
-The optimized build will be output to the `dist/` directory.
+## Usage
 
-### Preview Production Build
+### Encrypting a Passphrase
 
-```bash
-# Preview the production build locally
-npm run preview
+1. **Register** (first time only): expand *"First time?"* and click **Register Key** to create a resident credential on your hardware device.
+2. Go to the **Encrypt** tab.
+3. Enter the passphrase you want to protect.
+4. Click **+ Add Key** and touch your hardware key. Repeat for additional keys.
+6. Click **Encrypt & Download** — touch each listed key once when prompted.
+7. Save the downloaded `passphrase.secretum.json`.
+
+### Decrypting a Passphrase
+
+1. Go to the **Decrypt** tab.
+2. Drop or browse to your `.secretum.json` file, or paste the JSON directly.
+3. Click **Decrypt** and touch any enrolled hardware key.
+4. The passphrase is shown and auto-clears after 60 seconds.
+
+## Encrypted File Format
+
+```json
+{
+  "iv": "<base64url(12B)>",
+  "recipients": [
+    {
+      "kid": "<base64url(credentialId)>",
+      "prf_nonce": "<base64url(32 random bytes)>",
+      "encrypted_key": "<base64url(AES-KW wrapped DEK)>"
+    }
+  ],
+  "ciphertext": "<base64url(AES-GCM ciphertext + 16B tag)>"
+}
 ```
 
 ## Project Structure
 
 ```
-.
-├── app.ts              # Main application logic
-├── app.css             # Tailwind CSS styles
-├── index.html          # HTML entry point
-├── vite.config.ts      # Vite configuration
-├── tsconfig.json       # TypeScript configuration
-├── package.json        # Dependencies and scripts
-└── README.md           # This file
+app.ts          Main application logic (crypto + UI)
+app.css         Tailwind CSS styles
+index.html      HTML entry point
+vite.config.ts  Vite + Tailwind configuration
+tsconfig.json   TypeScript configuration
+package.json    Dependencies and scripts
 ```
 
 ## Technology Stack
 
-- **TypeScript**: Type-safe JavaScript
-- **Vite**: Fast build tool and dev server
-- **Tailwind CSS**: Utility-first CSS framework
-- **Web Crypto API**: Browser's native cryptography
-- **WebAuthn**: Hardware key authentication
+- **TypeScript** · **Vite** · **Tailwind CSS v4**
+- **Web Crypto API** — AES-GCM, AES-KW, HKDF-SHA-256
+- **WebAuthn PRF extension** (`hmac-secret`) via `navigator.credentials`
 
 ## Browser Support
 
-- Chrome/Chromium 116+
-- Edge 116+
-- Other Chromium-based browsers with WebAuthn support
+| Browser | Version |
+|---------|---------|
+| Chrome / Chromium | 116+ |
+| Edge | 116+ |
 
-## Security Considerations
-
-- **HTTPS Required**: WebAuthn only works over HTTPS or localhost
-- **No Backend Storage**: Nothing is stored on servers
-- **Origin Bound**: Each origin produces different passphrases for the same entry
-- **60-Second Auto-Clear**: Passphrases disappear from the UI after 60 seconds
-- **No Logging**: No tracking or analytics
+Firefox does not currently support the WebAuthn PRF extension.
 
 ## Troubleshooting
 
 | Issue | Solution |
 |-------|----------|
 | "WebAuthn requires HTTPS" | Use `https://` or `http://localhost` |
-| Key not recognized | Ensure your key supports FIDO2 with HMAC-secret (PRF) |
-| PRF not supported | Upgrade your key or browser (requires Chrome 116+) |
-| Passphrase not appearing | Try touching your key again when prompted |
+| PRF not returned | Upgrade to Chrome 116+ and use a PRF-capable key |
+| Decryption failed | Ensure you are using one of the keys that was enrolled during encryption |
+| Key not found | Register the key first via *"First time?"* in the Encrypt tab |
